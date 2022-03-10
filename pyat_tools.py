@@ -386,7 +386,7 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, rd, ranges, depths, freq, t
     write_env(f'{fn}.env', 'KRAKEN', title, freq, ssp, bdy, pos, [], cInt, RMax)
     return
 
-def change_env_freq(env_file, freq):
+def change_env_freq(env_file, freq, env_file_new = None):
     '''
     change frequency of an environment file without having to rewrite whole file
     
@@ -396,6 +396,8 @@ def change_env_freq(env_file, freq):
         path to environment file. Should contain file extension
     freq : float
         freq to write to file
+    env_file_new : str
+        path to new environment file. if None, then the original path is overwritten
         
     Returns
     -------
@@ -403,14 +405,24 @@ def change_env_freq(env_file, freq):
     
     - file located at env_file is rewritten
     '''
-    
-    a_file = open(env_file)
-    line_ls = a_file.readlines()
-    line_ls[1] = f'{freq}\n'
-    
-    a_file = open(env_file, "w")
-    a_file.writelines(line_ls)
-    a_file.close()
+    if env_file_new == None:
+        a_file = open(env_file)
+        line_ls = a_file.readlines()
+        line_ls[1] = f'{freq}\n'
+
+        a_file = open(env_file, "w")
+        a_file.writelines(line_ls)
+        a_file.close()
+    else:
+        os.system(f'cp {env_file} {env_file_new}')
+        
+        a_file = open(env_file_new)
+        line_ls = a_file.readlines()
+        line_ls[1] = f'{freq}\n'
+
+        a_file = open(env_file_new, "w")
+        a_file.writelines(line_ls)
+        a_file.close()
     
 def write_flp_file(source_depths, ranges, r_depths, fn, verbose=True):
     '''
@@ -444,12 +456,13 @@ def write_flp_file(source_depths, ranges, r_depths, fn, verbose=True):
     write_fieldflp(fn, 'R', pos)
     return
 
-def simulate_FDGF(fn, freqs, fband, krakenc=False, verbose=True):
+def simulate_FDGF_SingleRange(fn, freqs, fband, krakenc=False, verbose=True):
     '''
-    simulate_FDGF - runs simulation for frequency domain Greene's function. the FDGF is sampled
+    simulate_FDGF_singleRange - runs simulation for frequency domain Greene's function. the FDGF is sampled
         at freqs (array like). Before running this, a *.env and *.flp must be created with the
         name fn (located in python path). Currently hard coded to only work with single
-        source_depth, reciever_depth, and range.
+        source_depth, reciever_depth, and range. simulate_FDGF - a build of this function to 
+        handle multiple reciever locations, but single source location
         
     Parameters
     ----------
@@ -827,3 +840,148 @@ def create_NCCF(pt):
         coords = {'delay':np.hstack((-np.flipud(t[1:]), t))}
     )
     return NCCF_sim
+
+def simulate_green_1cpu(env_fn, freq, file_dir, fband):
+    '''
+    simulate_green_1cpu - simulate the greens function for a single frequency
+        given an environment file located at env_fn. New environment file will be
+        written to file_dir and frequency value will be overwritten with freq
+    This is designed to be called by multiprocessing
+    
+    Handling of frequencies where no modes propagate, or DC are approached by simply returning None
+    
+    Parameters
+    ----------
+    env_fn : str
+        path to environment file
+    freq : float
+        frequency in Hertz to evaluate green's function
+    file_dir : str
+        location where new .env .flp. .mod and .shd files will be written
+    freq_range : list of length 2
+        lower and upper frequencies
+    '''
+    # Check if frequency is in frequency band
+    if (freq < fband[0]) | (freq > fband[1]):
+        pressures = None
+        return pressures
+    
+    # Check if DC
+    if freq == 0:
+        pressures = None
+        return pressures
+    
+    process_name = mp.current_process().name
+    
+    fn = f'{file_dir}{env_fn}{process_name}'
+
+    # delete mod and shd files with same name
+    try:
+        os.remove(f'{file_dir}/{fn}.mod')
+    except FileNotFoundError:
+        pass
+    try:
+        os.remove(f'{file_dir}{fn}.shd')
+    except FileNotFoundError:
+        pass
+    # write new env file
+    
+    change_env_freq(f'{env_fn}.env', freq, env_file_new = f'{fn}.env')
+    
+    # Run Kraken
+    os.system(f'kraken.exe {fn}')
+    
+    # read mod file
+    try:
+        fname = f'{fn}.mod'
+        options = {'fname':fname, 'freq':freq}
+        modes = read_modes(**options)
+    # if there are no propagating modes, return None
+    except:
+        pressures = None
+        return pressures
+    
+    # Copy flp file to multiprocessing directory
+    os.system(f'cp {env_fn}.flp {fn}.flp')
+    
+    # Run field.exe
+    os.system(f'field.exe {fn}')
+    
+    try:
+        [_,_,_,_,Pos1,pressure]= read_shd(f'{fn}.shd')
+    except FileNotFoundError:
+        return None
+    
+    return pressure
+
+def simulate_FDGF(fn, freqs, fband, mp_file_dir):
+    '''
+    simulate_FDGF_singleRange - runs simulation for frequency domain Greene's function. the FDGF is sampled
+        at freqs (array like). Before running this, a *.env and *.flp must be created with the
+        name fn (located in python path).
+        
+    some notes:
+        there are several errors non-deterministic errors in the multiprocessing where it
+        fails for unpredictable frequencies... This is a big error that I need to figure out
+    
+    Parameters
+    ----------
+    fn : str
+        filename of environment and flp files. should NOT contain ext
+    freqs : np.array()
+        calculated with get_freq_time_vectors (freq_half)
+        array of frequency to simulate over. should contain (N/2 + 1) points
+        and span f = [0, Fs/2], where N is number of points in time domain.
+        result is manually flipped to account for negative frequencies.
+    fband : list
+        list of length 2 given the low and high bound of the valid frequency band in Hz
+    mp_file_dir : str
+        multiprocessing file directory - multiprocessing feature requires a directory where
+        it can write multiple environmental files. This string should be appended by /
+    
+    Returns
+    -------
+    pressures_flipped : np.array
+        array of shape[2*frequencies, source_depths, reciever range, reciever depth]
+        
+        The array is flipped to be conjugate (real fourier transform)
+    '''
+   
+    # create starmap input
+    inputs = []
+    for k in range(len(freqs)):
+        inputs.append((fn, freqs[k], mp_file_dir, fband))
+            
+    n_cpu = mp.cpu_count()
+    with mp.Pool(processes = n_cpu) as pool:
+        pressures_ls = pool.starmap(simulate_green_1cpu, inputs)
+        
+    # Construct a big 'ole array
+    pressures = np.zeros((len(freq_half), len(s_depths), len(ranges), len(r_depths))) + 1j*np.zeros((len(freq_half), len(s_depths), len(ranges), len(r_depths)))
+    
+    for k in range(len(freqs)):
+        if pressures_ls[k] is None:
+            pressures[k,:,:,:] = np.zeros((len(s_depths), len(ranges), len(r_depths)))
+        else:
+            pressures[k,:,:,:] = pressures_ls[k][0,:,:,:]
+
+    # set all nan to zero
+    pressures[np.isnan(pressures)] = 0
+    
+    
+    # Make sure that pressures_f is valid fourier transform
+    # (aka force X[0] and X[N/2] to be real (for even N))
+    pressures[0,:,:,:] = np.real(pressures[0,:,:,:])
+    pressures[-1,:,:,:] = np.real(pressures[-1,:,:,:])
+
+    # Create flipped frequency
+    pressures_flipped = np.concatenate((
+        pressures,
+        np.flipud(np.conjugate(pressures[1:-1,:,:,:]))
+    ))
+    
+    return pressures_flipped
+
+def dummy(k):
+    print(mp.current_process().name)
+    return k
