@@ -485,7 +485,7 @@ def simulate_FDGF_SingleRange(fn, freqs, fband, krakenc=False, verbose=True):
     '''
     freqs = list(freqs)
     pressures = []
-    for freq in tqdm(freqs, disable=~verbose):
+    for freq in tqdm(freqs):
         # Check if frequency is in frequency band
         if (freq < fband[0]) | (freq > fband[1]):
             pressures.append(0)
@@ -861,16 +861,17 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     freq_range : list of length 2
         lower and upper frequencies
     '''
+
     # Check if frequency is in frequency band
     if (freq < fband[0]) | (freq > fband[1]):
         pressures = None
         return pressures
-    
+
     # Check if DC
     if freq == 0:
         pressures = None
         return pressures
-    
+
     process_name = mp.current_process().name
     
     fn = f'{file_dir}{env_fn}{process_name}'
@@ -884,12 +885,12 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
         os.remove(f'{file_dir}{fn}.shd')
     except FileNotFoundError:
         pass
-    # write new env file
     
+    # write new env file
     change_env_freq(f'{env_fn}.env', freq, env_file_new = f'{fn}.env')
     
     # Run Kraken
-    os.system(f'kraken.exe {fn}')
+    os.system(f'kraken.exe {fn} >/dev/null 2>&1')
     
     # read mod file
     try:
@@ -900,12 +901,12 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     except:
         pressures = None
         return pressures
-    
+
     # Copy flp file to multiprocessing directory
     os.system(f'cp {env_fn}.flp {fn}.flp')
     
     # Run field.exe
-    os.system(f'field.exe {fn}')
+    os.system(f'field.exe {fn} >/dev/null 2>&1')
     
     try:
         [_,_,_,_,Pos1,pressure]= read_shd(f'{fn}.shd')
@@ -914,12 +915,14 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     
     return pressure
 
-def simulate_FDGF(fn, freqs, fband, mp_file_dir):
+def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True):
     '''
-    simulate_FDGF_singleRange - runs simulation for frequency domain Greene's function. the FDGF is sampled
+    simulate_FDGF - runs simulation for frequency domain Greene's function. the FDGF is sampled
         at freqs (array like). Before running this, a *.env and *.flp must be created with the
         name fn (located in python path).
         
+    for calling this function from an external script, you need to put everything relating to
+        this function and it's outputs inside if __name__ == '__main__': (who knows why)
     some notes:
         there are several errors non-deterministic errors in the multiprocessing where it
         fails for unpredictable frequencies... This is a big error that I need to figure out
@@ -938,6 +941,14 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir):
     mp_file_dir : str
         multiprocessing file directory - multiprocessing feature requires a directory where
         it can write multiple environmental files. This string should be appended by /
+    data_lens : dict
+        length of all the flp variables should have structure:
+        {'s_depths': len of source depths,,
+         'ranges': len of source depths,
+         'r_depths': len of reciever depths
+         }
+    multiprocessing : bool
+        mostly for debugging, if false a simple for loop is used.
     
     Returns
     -------
@@ -946,39 +957,45 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir):
         
         The array is flipped to be conjugate (real fourier transform)
     '''
-   
     # create starmap input
     inputs = []
     for k in range(len(freqs)):
         inputs.append((fn, freqs[k], mp_file_dir, fband))
-            
     n_cpu = mp.cpu_count()
-    with mp.Pool(processes = n_cpu) as pool:
-        pressures_ls = pool.starmap(simulate_green_1cpu, inputs)
-        
+    
+    if multiprocessing:
+        #if __name__ == '__main__':
+        with mp.Pool(processes = n_cpu) as pool:
+            pressures_ls = pool.starmap(simulate_green_1cpu, inputs)
+    else:
+        pressures_ls = []
+        for input_single in tqdm(inputs):
+            #print(input_single[0], input_single[1],input_single[2],input_single[3])
+            pressures_ls.append(simulate_green_1cpu(input_single[0], input_single[1],input_single[2],input_single[3]))
+   
     # Construct a big 'ole array
-    pressures = np.zeros((len(freq_half), len(s_depths), len(ranges), len(r_depths))) + 1j*np.zeros((len(freq_half), len(s_depths), len(ranges), len(r_depths)))
+    #print(len(freqs), data_lens['s_depths'], data_lens['ranges'], data_lens['r_depths'])
+    pressures = np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],)) + 1j*np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
     
     for k in range(len(freqs)):
         if pressures_ls[k] is None:
-            pressures[k,:,:,:] = np.zeros((len(s_depths), len(ranges), len(r_depths)))
+            pressures[k,:,:,:] = np.zeros((data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
         else:
             pressures[k,:,:,:] = pressures_ls[k][0,:,:,:]
 
     # set all nan to zero
     pressures[np.isnan(pressures)] = 0
     
-    
     # Make sure that pressures_f is valid fourier transform
     # (aka force X[0] and X[N/2] to be real (for even N))
     pressures[0,:,:,:] = np.real(pressures[0,:,:,:])
     pressures[-1,:,:,:] = np.real(pressures[-1,:,:,:])
-
+    
     # Create flipped frequency
     pressures_flipped = np.concatenate((
         pressures,
-        np.flipud(np.conjugate(pressures[1:-1,:,:,:]))
-    ))
+        np.conjugate(np.flip(pressures[1:-1,:,:,:], axis=0))
+    ), axis=0)
     
     return pressures_flipped
 
