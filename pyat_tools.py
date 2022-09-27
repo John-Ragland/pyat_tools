@@ -910,12 +910,13 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     
     try:
         [_,_,_,_,Pos1,pressure]= read_shd(f'{fn}.shd')
-    except FileNotFoundError:
+    #except FileNotFoundError:
+    except: # this is terrible and should eventually be removed haha
         return None
     
     return pressure
 
-def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True):
+def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True, verbose=False):
     '''
     simulate_FDGF - runs simulation for frequency domain Greene's function. the FDGF is sampled
         at freqs (array like). Before running this, a *.env and *.flp must be created with the
@@ -949,6 +950,7 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True
          }
     multiprocessing : bool
         mostly for debugging, if false a simple for loop is used.
+    verbose=False
     
     Returns
     -------
@@ -957,6 +959,8 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True
         
         The array is flipped to be conjugate (real fourier transform)
     '''
+    
+    if verbose: print('simulating environment...')
     # create starmap input
     inputs = []
     for k in range(len(freqs)):
@@ -972,7 +976,7 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True
         for input_single in tqdm(inputs):
             #print(input_single[0], input_single[1],input_single[2],input_single[3])
             pressures_ls.append(simulate_green_1cpu(input_single[0], input_single[1],input_single[2],input_single[3]))
-   
+    print('constructing array...')
     # Construct a big 'ole array
     #print(len(freqs), data_lens['s_depths'], data_lens['ranges'], data_lens['r_depths'])
     pressures = np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],)) + 1j*np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
