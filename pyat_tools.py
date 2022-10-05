@@ -767,7 +767,7 @@ def get_freq_time_vectors(Fs, To, verbose=True):
     freq_half = np.arange((N)/2 + 1)*Fs/(N)
     freq_full = np.arange(N)*Fs/N
     if verbose:
-        print(f'N:\t{N}\nTo:\t{To} [s]\nΔf\t{Fs/(N*2)}')
+        print(f'N:\t{N}\nTo:\t{To} [s]\nΔf\t{Fs/(N)}')
         
     return t, freq_half, freq_full
 
