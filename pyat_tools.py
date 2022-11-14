@@ -273,7 +273,7 @@ def pyat_test_case(freq):
     modes = read_modes(**options)
     return modes
 
-def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, rd, ranges, depths, freq, title, fn, verbose):
+def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, ranges, depths, freq, title, fn, verbose):
     '''
    write_env_file() - writes environment file for given
         and given SSP, bottom_depth, sd, rd, and freq. Code is tweaked from
@@ -291,8 +291,6 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, rd, ranges, depths, freq, t
         depth of the flat ocean bottom
     sd : float
         depth of source in meters
-    rd : list
-        list of reciever depths
     ranges : numpy.array
         array of ranges (km) for simulation ex. np.arange(0,10,0.01)
     depths : numpy.array
@@ -342,13 +340,13 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, rd, ranges, depths, freq, t
     pos.r.depth	 = Z
     pos.r.range		=	X
     pos.Nsd = 1
-    pos.Nrd = len(rd)
+    pos.Nrd = len(ranges)
     depth = [0, bottom_depth] 
     
     # Layer 1
     # Resample provided ssp to be uniform (using cubic spline)
     cs = CubicSpline(ssp_arlpy[:,0], ssp_arlpy[:,1])
-    z1 = np.linspace(0,bottom_depth, bottom_depth) # 1 m resolution
+    z1 = np.linspace(0,bottom_depth, int(bottom_depth)) # 1 m resolution
     alphaR = cs(z1)
 
     betaR	=	0.0*np.ones(z1.shape)
@@ -379,7 +377,8 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, rd, ranges, depths, freq, t
             return
 
     cInt = Empty()
-    cInt.High = cb
+    # manually changed this....
+    cInt.High = 1000000000
     cInt.Low = 0 # compute automatically
     RMax = max(X)
 
@@ -976,7 +975,10 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True
         for input_single in tqdm(inputs):
             #print(input_single[0], input_single[1],input_single[2],input_single[3])
             pressures_ls.append(simulate_green_1cpu(input_single[0], input_single[1],input_single[2],input_single[3]))
-    print('constructing array...')
+    
+    if verbose:
+        print('constructing array...')
+        
     # Construct a big 'ole array
     #print(len(freqs), data_lens['s_depths'], data_lens['ranges'], data_lens['r_depths'])
     pressures = np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],)) + 1j*np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
