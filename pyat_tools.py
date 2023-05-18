@@ -914,11 +914,11 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
         return None
     
     # Delete mod / shd / env / flp / prt
-    os.remove(f'{file_dir}/{fn}.mod')
-    os.remove(f'{file_dir}{fn}.shd')
-    os.remove(f'{file_dir}{fn}.env')
-    os.remove(f'{file_dir}{fn}.flp')
-    os.remove(f'{file_dir}{fn}.prt')
+    os.remove(f'{fn}.mod')
+    os.remove(f'{fn}.shd')
+    os.remove(f'{fn}.env')
+    os.remove(f'{fn}.flp')
+    os.remove(f'{fn}.prt')
     
     return pressure
 
