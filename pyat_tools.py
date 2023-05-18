@@ -913,6 +913,13 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     except: # this is terrible and should eventually be removed haha
         return None
     
+    # Delete mod / shd / env / flp / prt
+    os.remove(f'{file_dir}/{fn}.mod')
+    os.remove(f'{file_dir}{fn}.shd')
+    os.remove(f'{file_dir}{fn}.env')
+    os.remove(f'{file_dir}{fn}.flp')
+    os.remove(f'{file_dir}{fn}.prt')
+    
     return pressure
 
 def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True, verbose=False):
