@@ -7,8 +7,8 @@ import numpy as np
 from os import system
 import os
 from matplotlib import pyplot as plt
-from pyat.pyat.env import *
-from pyat.pyat.readwrite import *
+from pyat.env import *
+from pyat.readwrite import *
 
 import xarray as xr
 import pandas as pd
@@ -273,7 +273,7 @@ def pyat_test_case(freq):
     modes = read_modes(**options)
     return modes
 
-def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, ranges, depths, freq, title, fn, verbose):
+def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, ranges, depths, freq, title, fn, verbose, cb=1600):
     '''
    write_env_file() - writes environment file for given
         and given SSP, bottom_depth, sd, rd, and freq. Code is tweaked from
@@ -303,6 +303,8 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, ranges, depths, freq, title
         filename for .mod, .env, .prt files. should NOT contain extension
     verbose : bool
         specifies whether to print statements or not
+
+
     Returns
     -------
     modes : pyat.pyat.env.Modes
@@ -329,7 +331,7 @@ def write_env_file_pyat(ssp_arlpy, bottom_depth, sd, ranges, depths, freq, title
 
     pw		=	1
     aw		=	0
-    cb		=	1600
+    #cb		=	1600
     pb		=	1.8
     ab		=	0.2
 
