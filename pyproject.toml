@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -31,8 +31,12 @@ Documentation = "https://github.com/unknown/pyat-tools#readme"
 Issues = "https://github.com/unknown/pyat-tools/issues"
 Source = "https://github.com/unknown/pyat-tools"
 
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
+
 [tool.hatch.version]
-path = "src/pyat_tools/__about__.py"
+source="vcs"
+vcs="git"
 
 [tool.hatch.envs.default]
 dependencies = [
