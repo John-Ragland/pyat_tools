@@ -4,3 +4,8 @@
 .DS_Store
 multiprocessing/*
 *.pyc
+*.env
+*.mod
+*.prt
+*.shd
+*.flp

@@ -924,6 +924,88 @@ def simulate_green_1cpu(env_fn, freq, file_dir, fband):
     
     return pressure
 
+def simulate_green_1cpu_modesep(env_fn, freq, file_dir, fband, r, zs, max_N=500):
+    '''
+    simulate_green_1cpu - simulate the greens function for a single frequency
+        given an environment file located at env_fn. New environment file will be
+        written to file_dir and frequency value will be overwritten with freq
+    This is designed to be called by multiprocessing
+    
+    Handling of frequencies where no modes propagate, or DC are approached by simply returning None
+    
+    Parameters
+    ----------
+    env_fn : str
+        path to environment file
+    freq : float
+        frequency in Hertz to evaluate green's function
+    file_dir : str
+        location where new .env .flp. .mod and .shd files will be written
+    freq_range : list of length 2
+        lower and upper frequencies
+    '''
+
+    # Check if frequency is in frequency band
+    if (freq < fband[0]) | (freq > fband[1]):
+        pressures = None
+        return pressures
+
+    # Check if DC
+    if freq == 0:
+        pressures = None
+        return pressures
+
+    process_name = mp.current_process().name
+    
+    fn = f'{file_dir}{env_fn}{process_name}'
+
+    # delete mod and shd files with same name
+    try:
+        os.remove(f'{file_dir}/{fn}.mod')
+    except FileNotFoundError:
+        pass
+    try:
+        os.remove(f'{file_dir}{fn}.shd')
+    except FileNotFoundError:
+        pass
+    
+    # write new env file
+    change_env_freq(f'{env_fn}.env', freq, env_file_new = f'{fn}.env')
+    
+    # Run Kraken
+    os.system(f'kraken.exe {fn} >/dev/null 2>&1')
+    
+    # read mod file
+    try:
+        fname = f'{fn}.mod'
+        options = {'fname':fname, 'freq':freq}
+        modes = read_modes(**options)
+    # if there are no propagating modes, return None
+    except:
+        pressure = None
+        return pressure
+    
+    z_src_idx = np.argmin(np.abs(modes.z - zs))
+    Kn = np.expand_dims(modes.k, axis=0)[:,:max_N]
+    p = -1j * ((2*np.pi)/(Kn*r))**(0.5) * modes.phi[z_src_idx,:max_N] * modes.phi[:,:max_N] * np.exp(1j*(-Kn*r + np.pi/4))
+
+    pad = 1j*np.zeros((p.shape[0], int(max_N - p.shape[1])))
+    p_pad = np.concatenate((p, pad), axis=1)
+   # p_pad = np.concatenate(p, np.zeros((p.shape[0], int(max_N - p.shape[1]))))
+
+    # Delete mod / shd / env / flp / prt
+
+
+    os.remove(f'{fn}.mod')
+    #os.remove(f'{fn}.shd')
+    os.remove(f'{fn}.env')
+    #os.remove(f'{fn}.flp')
+    os.remove(f'{fn}.prt')
+
+
+    
+    return p_pad
+
 def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True, verbose=False):
     '''
     simulate_FDGF - runs simulation for frequency domain Greene's function. the FDGF is sampled
@@ -984,6 +1066,97 @@ def simulate_FDGF(fn, freqs, fband, mp_file_dir, data_lens, multiprocessing=True
         for input_single in tqdm(inputs):
             #print(input_single[0], input_single[1],input_single[2],input_single[3])
             pressures_ls.append(simulate_green_1cpu(input_single[0], input_single[1],input_single[2],input_single[3]))
+    
+    if verbose:
+        print('constructing array...')
+        
+    # Construct a big 'ole array
+    #print(len(freqs), data_lens['s_depths'], data_lens['ranges'], data_lens['r_depths'])
+    pressures = np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],)) + 1j*np.zeros((len(freqs), data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
+    
+    for k in range(len(freqs)):
+        if pressures_ls[k] is None:
+            pressures[k,:,:,:] = np.zeros((data_lens['s_depths'], data_lens['r_depths'], data_lens['ranges'],))
+        else:
+            pressures[k,:,:,:] = pressures_ls[k][0,:,:,:]
+
+    # set all nan to zero
+    pressures[np.isnan(pressures)] = 0
+    return pressures
+    # Make sure that pressures_f is valid fourier transform
+    # (aka force X[0] and X[N/2] to be real (for even N))
+    pressures[0,:,:,:] = np.real(pressures[0,:,:,:])
+    pressures[-1,:,:,:] = np.real(pressures[-1,:,:,:])
+    
+    # Create flipped frequency
+    pressures_flipped = np.concatenate((
+        pressures,
+        np.conjugate(np.flip(pressures[1:-1,:,:,:], axis=0))
+    ), axis=0)
+    
+    return pressures_flipped
+
+def simulate_FDGF_modesep(fn, freqs, fband, mp_file_dir, data_lens, r, zs, max_N=500, multiprocessing=True, verbose=False):
+    '''
+    simulate_FDGF - runs simulation for frequency domain Greene's function. the FDGF is sampled
+        at freqs (array like). Before running this, a *.env and *.flp must be created with the
+        name fn (located in python path).
+        
+    for calling this function from an external script, you need to put everything relating to
+        this function and it's outputs inside if __name__ == '__main__': (who knows why)
+    some notes:
+        there are several errors non-deterministic errors in the multiprocessing where it
+        fails for unpredictable frequencies... This is a big error that I need to figure out
+    
+    Parameters
+    ----------
+    fn : str
+        filename of environment and flp files. should NOT contain ext
+    freqs : np.array()
+        calculated with get_freq_time_vectors (freq_half)
+        array of frequency to simulate over. should contain (N/2 + 1) points
+        and span f = [0, Fs/2], where N is number of points in time domain.
+        result is manually flipped to account for negative frequencies.
+    fband : list
+        list of length 2 given the low and high bound of the valid frequency band in Hz
+    mp_file_dir : str
+        multiprocessing file directory - multiprocessing feature requires a directory where
+        it can write multiple environmental files. This string should be appended by /
+    data_lens : dict
+        length of all the flp variables should have structure:
+        {'s_depths': len of source depths,,
+         'ranges': len of source depths,
+         'r_depths': len of reciever depths
+         }
+    r : float
+        range of recievers in meters
+    zs : float
+        source depth in meters
+    max_N : int
+        maximum number of modes to use in calculation
+    multiprocessing : bool
+        mostly for debugging, if false a simple for loop is used.
+    verbose=False
+    
+    Returns
+    -------
+    pressures_flipped : np.array
+        array of shape[2*frequencies, source_depths, reciever range, reciever depth]
+        
+        The array is flipped to be conjugate (real fourier transform)
+    '''
+    
+    if verbose: print('simulating environment...')
+    # create starmap input
+    inputs = []
+    
+    for k in range(len(freqs)):
+        inputs.append((fn, freqs[k], mp_file_dir, fband, r, zs, max_N))
+    n_cpu = mp.cpu_count()
+    
+    with mp.Pool(processes = n_cpu) as pool:
+        pressures_ls = pool.starmap(simulate_green_1cpu_modesep, inputs)
+    return pressures_ls
     
     if verbose:
         print('constructing array...')
